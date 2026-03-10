@@ -44,9 +44,12 @@ class SPTDataLoaderServiceHook: ClassHook<NSObject>, SpotifySessionDelegate {
 
     // orion:new
     func handleBlockedEndpoint(_ url: URL, task: URLSessionDataTask, session: URLSession) {
+        let elapsed = Int(Date().timeIntervalSince(tweakInitTime))
         if url.isDeleteToken {
+            writeDebugLog("[DL] Blocked DeleteToken at \(elapsed)s")
             respondWithCustomData(Data(), task: task, session: session)
         } else if url.isAccountValidate {
+            writeDebugLog("[DL] Blocked account validate at \(elapsed)s")
             let response = "{\"status\":1,\"country\":\"US\",\"is_country_launched\":true}".data(using: .utf8)!
             respondWithCustomData(response, task: task, session: session)
         } else if url.isOndemandSelector {
@@ -61,6 +64,7 @@ class SPTDataLoaderServiceHook: ClassHook<NSObject>, SpotifySessionDelegate {
         } else if url.isPushkaTokens {
             respondWithCustomData(Data(), task: task, session: session)
         } else if url.isSessionInvalidation {
+            writeDebugLog("[DL] Blocked session invalidation URL at \(elapsed)s: \(url.path)")
             respondWithCustomData(Data(), task: task, session: session)
         }
         orig.URLSession(session, task: task, didCompleteWithError: nil)
@@ -143,7 +147,7 @@ class SPTDataLoaderServiceHook: ClassHook<NSObject>, SpotifySessionDelegate {
                     // Show popup indicating custom lyrics source - DISABLED FOR PRODUCTION
                     // DispatchQueue.main.async {
                     //     PopUpHelper.showPopUp(
-                    //         message: "🎵 Using \(UserDefaults.lyricsSource.description) lyrics",
+                    //         message: "Using \(UserDefaults.lyricsSource.description) lyrics",
                     //         buttonText: "OK"
                     //     )
                     // }
@@ -159,7 +163,7 @@ class SPTDataLoaderServiceHook: ClassHook<NSObject>, SpotifySessionDelegate {
                     // Show popup indicating fallback to original - DISABLED FOR PRODUCTION
                     // DispatchQueue.main.async {
                     //     PopUpHelper.showPopUp(
-                    //         message: result == .timedOut ? "⏱️ Using Spotify Original (timeout)" : "🎵 Using Spotify Original",
+                    //         message: result == .timedOut ? "Using Spotify Original (timeout)" : "Using Spotify Original",
                     //         buttonText: "OK"
                     //     )
                     // }

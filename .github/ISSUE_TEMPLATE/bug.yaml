@@ -35,3 +35,15 @@ body:
       description: Attach videos or screenshots if possible
     validations:
       required: true
+
+  - type: dropdown
+    attributes:
+      label: Install method
+      options:
+        - TrollStore
+        - AltStore
+        - Sideloadly
+        - LiveContainer
+        - Other
+    validations:
+      required: true

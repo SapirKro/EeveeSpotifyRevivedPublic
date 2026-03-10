@@ -32,8 +32,15 @@ private let propertyReplacements = [
     EeveePropertyReplacement(name: "is_remove_from_queue_enabled_for_mft_plus", modification: .remove),
     EeveePropertyReplacement(name: "is_reordering_for_mft_plus_allowed", modification: .remove),
     
-    // 😡😡😡 spotify, stop changing the scroll logic
-    EeveePropertyReplacement(name: "should_nova_scroll_use_scrollsita", modification: .remove)
+    // spotify, stop changing the scroll logic
+    EeveePropertyReplacement(name: "should_nova_scroll_use_scrollsita", modification: .remove),
+    
+    // prevent shuffle preference from resetting to "Fewer Repeats" on restart
+    EeveePropertyReplacement(name: "enable_play_history_shuffle_scorer", modification: .setBool(false)),
+    EeveePropertyReplacement(name: "enable_play_history_shuffle_scorer_for_all", modification: .setBool(false)),
+    
+    // forced logout prevention
+    EeveePropertyReplacement(scope: "ios-authentication-forced-logout-impl", modification: .remove)
 ]
 
 private func modifyAssignedValues(_ values: inout [AssignedValue]) {
@@ -102,6 +109,14 @@ private func modifyAttributes(_ attributes: inout [String: AccountAttribute]) {
         $0.boolValue = true
     }
 
+    attributes["on-demand-trial"] = AccountAttribute.with {
+        $0.stringValue = "trial_with_offline_active"
+    }
+
+    attributes["on-demand-trial-in-progress"] = AccountAttribute.with {
+        $0.boolValue = true
+    }
+
     attributes["payments-initial-campaign"] = AccountAttribute.with {
         $0.stringValue = "default"
     }
@@ -120,6 +135,18 @@ private func modifyAttributes(_ attributes: inout [String: AccountAttribute]) {
 
     attributes["shuffle-eligible"] = AccountAttribute.with {
         $0.boolValue = true
+    }
+
+    attributes["pick-and-shuffle"] = AccountAttribute.with {
+        $0.boolValue = false
+    }
+
+    attributes["shuffle"] = AccountAttribute.with {
+        $0.boolValue = false
+    }
+
+    attributes["smart-shuffle"] = AccountAttribute.with {
+        $0.stringValue = "ELIGIBLE"
     }
 
     attributes["social-session"] = AccountAttribute.with {
@@ -144,6 +171,10 @@ private func modifyAttributes(_ attributes: inout [String: AccountAttribute]) {
 
     attributes["unrestricted"] = AccountAttribute.with {
         $0.boolValue = true
+    }
+
+    attributes["shuffle-algorithm"] = AccountAttribute.with {
+        $0.stringValue = "SIMPLE_SHUFFLE"
     }
 
     attributes.removeValue(forKey: "payment-state")

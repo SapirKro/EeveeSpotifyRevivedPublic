@@ -75,7 +75,7 @@ func activatePremiumPatchingGroup() {
 }
 
 struct EeveeSpotify: Tweak {
-    static let version = "6.6.0"
+    static let version = "6.6.1"
     
     static var hookTarget: VersionHookTarget {
         let version = Bundle.main.infoDictionary!["CFBundleShortVersionString"] as! String
@@ -98,7 +98,40 @@ struct EeveeSpotify: Tweak {
     init() {
         // Activate session logout protection first (all versions)
         SessionLogoutHookGroup().activate()
-        writeDebugLog("EeveeSpotify \(EeveeSpotify.version) initialized — hook target: \(EeveeSpotify.hookTarget)")
+        
+        let spotifyVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "unknown"
+        let spotifyBuild = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "unknown"
+        let iosVersion = UIDevice.current.systemVersion
+        let deviceModel = UIDevice.current.model
+        writeDebugLog("=== EeveeSpotify \(EeveeSpotify.version) starting ===")
+        writeDebugLog("[INIT] Spotify: \(spotifyVersion) (build \(spotifyBuild))")
+        writeDebugLog("[INIT] iOS: \(iosVersion), Device: \(deviceModel)")
+        writeDebugLog("[INIT] Hook target: \(EeveeSpotify.hookTarget)")
+        writeDebugLog("[INIT] Patch type: \(UserDefaults.patchType)")
+        writeDebugLog("[INIT] Lyrics source: \(UserDefaults.lyricsSource)")
+        writeDebugLog("[INIT] tweakInitTime: \(tweakInitTime)")
+
+        // Verify critical hook targets exist
+        let hookTargets: [(String, String)] = [
+            ("SPTAuthSessionImplementation", "SPTAuthSession"),
+            ("_TtC24Connectivity_SessionImpl18SessionServiceImpl", "SessionServiceImpl"),
+            ("SPTAuthLegacyLoginControllerImplementation", "LegacyLoginController"),
+            ("_TtC24Connectivity_SessionImplP33_831B98CC28223E431E21CD27ADD20AF222OauthAccessTokenBridge", "OauthAccessTokenBridge"),
+            ("ARTWebSocketTransport", "AblyWebSocket"),
+            ("ARTSRWebSocket", "AblySRWebSocket"),
+        ]
+        var allFound = true
+        for (className, label) in hookTargets {
+            if NSClassFromString(className) != nil {
+                writeDebugLog("[INIT] \(label) class found")
+            } else {
+                writeDebugLog("[INIT] MISSING class for \(label): \(className)")
+                allFound = false
+            }
+        }
+        if allFound {
+            writeDebugLog("[INIT] All \(hookTargets.count) hook targets verified")
+        }
 
         // For 9.1.x, activate premium patching and lyrics
         if EeveeSpotify.hookTarget == .v91 {
@@ -107,7 +140,7 @@ struct EeveeSpotify: Tweak {
             if UserDefaults.patchType.isPatching {
                 BasePremiumPatchingGroup().activate()
             }
-            
+
             let lyricsEnabled = UserDefaults.lyricsSource.isReplacingLyrics
             
             if lyricsEnabled {
@@ -127,16 +160,16 @@ struct EeveeSpotify: Tweak {
             
             // Show startup popup with status - DISABLED FOR PRODUCTION
             // DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
-            //     let lyricsStatus = lyricsEnabled ? "✅ ENABLED (\(UserDefaults.lyricsSource.rawValue))" : "❌ DISABLED"
+            //     let lyricsStatus = lyricsEnabled ? "ENABLED (\(UserDefaults.lyricsSource.rawValue))" : "DISABLED"
             //     let sourceName = UserDefaults.lyricsSource.description
             //     let message = """
             //     EeveeSpotify \(EeveeSpotify.version)
             //     Spotify 9.1.x EXPERIMENTAL
             //     
-            //     📝 Lyrics: \(lyricsStatus)
+            //     Lyrics: \(lyricsStatus)
             //     Source: \(sourceName)
             //     
-            //     🔍 Tap 'Start' to capture network requests.
+            //     Tap 'Start' to capture network requests.
             //     
             //     After ~15 requests you'll see if 9.1.6 makes lyrics network calls.
             //     
@@ -153,7 +186,7 @@ struct EeveeSpotify: Tweak {
             //             
             //             DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
             //                 PopUpHelper.showPopUp(
-            //                     message: "🔍 Capturing started!\n\nNow open ANY song and tap lyrics.\n\nWait ~15 seconds for results.",
+            //                     message: "Capturing started!\n\nNow open ANY song and tap lyrics.\n\nWait ~15 seconds for results.",
             //                     buttonText: "OK"
             //                 )
             //             }
@@ -176,7 +209,7 @@ struct EeveeSpotify: Tweak {
         if UserDefaults.patchType.isPatching {
             activatePremiumPatchingGroup()
         }
-        
+
         if UserDefaults.lyricsSource.isReplacingLyrics {
             BaseLyricsGroup().activate()
             LyricsErrorHandlingGroup().activate()
