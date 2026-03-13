@@ -22,33 +22,45 @@ private let ablyActionNames: [Int: String] = [
 
 class SPTAuthSessionHook: ClassHook<NSObject> {
     typealias Group = SessionLogoutHookGroup
+    // Specifies the Objective-C class name to hook: SPTAuthSessionImplementation
     static let targetName = "SPTAuthSessionImplementation"
 
     // orion:new
+    // Global flag to control if a logout should strictly be allowed (e.g. user tapped "Log out")
     static var allowLogout = false
 
     func logout() {
+        // Calculate time elapsed since app start for logging context
         let elapsed = Int(Date().timeIntervalSince(tweakInitTime))
+        
+        // Check if the user explicitly initiated this logout via our flag
         if SPTAuthSessionHook.allowLogout {
             writeDebugLog("[AUTH] Allowed logout() at \(elapsed)s")
+            // Call the original method to actually log out
             orig.logout()
         } else {
+            // Otherwise, ignore the logout command from the app/server
             writeDebugLog("[AUTH] Blocked logout() at \(elapsed)s")
         }
     }
 
     func logoutWithReason(_ reason: AnyObject) {
         let elapsed = Int(Date().timeIntervalSince(tweakInitTime))
+        
+        // Check if we should allow this specific logout attempt
         if SPTAuthSessionHook.allowLogout {
             writeDebugLog("[AUTH] Allowed logoutWithReason at \(elapsed)s: \(reason)")
             orig.logoutWithReason(reason)
         } else {
+            // Block the logout and log the reason provided by Spotify
             writeDebugLog("[AUTH] Blocked logoutWithReason at \(elapsed)s: \(reason)")
         }
     }
 
     func callSessionDidLogoutOnDelegateWithReason(_ reason: AnyObject) {
         let elapsed = Int(Date().timeIntervalSince(tweakInitTime))
+        
+        // Prevent the delegate (UI/App logic) from being notified that a logout happened
         if SPTAuthSessionHook.allowLogout {
             orig.callSessionDidLogoutOnDelegateWithReason(reason)
         } else {
@@ -58,6 +70,8 @@ class SPTAuthSessionHook: ClassHook<NSObject> {
 
     func logWillLogoutEventWithLogoutReason(_ reason: AnyObject) {
         let elapsed = Int(Date().timeIntervalSince(tweakInitTime))
+        
+        // Prevent internal analytics/logging events regarding the forced logout
         if SPTAuthSessionHook.allowLogout {
             orig.logWillLogoutEventWithLogoutReason(reason)
         } else {
@@ -67,9 +81,13 @@ class SPTAuthSessionHook: ClassHook<NSObject> {
 
     func destroy() {
         let elapsed = Int(Date().timeIntervalSince(tweakInitTime))
+        
+        // Crucial: 'destroy' tears down the underlying C++ session object.
+        // We block this to keep the session valid in memory.
         if SPTAuthSessionHook.allowLogout {
             orig.destroy()
         } else {
+            // Capture a stack trace to see what triggered the destroy
             let trace = Thread.callStackSymbols.prefix(15).joined(separator: "\n")
             writeDebugLog("[AUTH] Blocked session destroy at \(elapsed)s\n[TRACE] \(trace)")
         }
@@ -77,13 +95,17 @@ class SPTAuthSessionHook: ClassHook<NSObject> {
 
     func productStateUpdated(_ state: AnyObject) {
         let elapsed = Int(Date().timeIntervalSince(tweakInitTime))
+        // Spy on product state updates (e.g. Free vs Premium status changes) for debugging
         writeDebugLog("[AUTH] productStateUpdated at \(elapsed)s -- \(state)")
+        // Pass through to original implementation so the app updates its UI/state
         orig.productStateUpdated(state)
     }
 
     func tryReconnect(_ arg1: AnyObject, toAP arg2: AnyObject) {
         let elapsed = Int(Date().timeIntervalSince(tweakInitTime))
+        // Spy on reconnection attempts to access points
         writeDebugLog("[AUTH] tryReconnect at \(elapsed)s -- AP: \(arg2)")
+        // Pass through to allow normal reconnection behavior
         orig.tryReconnect(arg1, toAP: arg2)
     }
 }
@@ -92,29 +114,43 @@ class SPTAuthSessionHook: ClassHook<NSObject> {
 
 class SessionServiceImplHook: ClassHook<NSObject> {
     typealias Group = SessionLogoutHookGroup
+    // Target the Swift-based session service implementation
     static let targetName = "_TtC24Connectivity_SessionImpl18SessionServiceImpl"
 
     func automatedLogoutThenLogin() {
         let elapsed = Int(Date().timeIntervalSince(tweakInitTime))
+        // Completely block this method. It is often used by the app to force a session refresh
+        // or re-login, which can trigger account validation and subsequent downgrade to free.
         writeDebugLog("[SESSION] Blocked automatedLogoutThenLogin at \(elapsed)s")
     }
 
     func userInitiatedLogout() {
         let elapsed = Int(Date().timeIntervalSince(tweakInitTime))
+        
+        // Check if the call is coming from the Main Thread (UI interaction).
+        // Real user clicks happen on the main thread.
         if Thread.isMainThread {
             writeDebugLog("[SESSION] Allowed userInitiatedLogout at \(elapsed)s (main thread)")
+            // Temporarily allow logout so the user can sign out via Settings.
             SPTAuthSessionHook.allowLogout = true
+            // Execute the original logout logic
             orig.userInitiatedLogout()
+            // Reset the flag after 5 seconds to re-enable protection.
             DispatchQueue.main.asyncAfter(deadline: .now() + 5) {
                 SPTAuthSessionHook.allowLogout = false
             }
         } else {
+            // Block calls from background threads, as these are likely internal
+            // app mechanisms trying to force a logout, not the user.
             writeDebugLog("[SESSION] Blocked automated userInitiatedLogout at \(elapsed)s (bg thread)")
         }
     }
 
     func sessionDidLogout(_ session: AnyObject, withReason reason: AnyObject) {
         let elapsed = Int(Date().timeIntervalSince(tweakInitTime))
+        
+        // Prevent the session service from notifying listeners about a logout
+        // unless it was explicitly allowed (via the userInitiatedLogout flow).
         if SPTAuthSessionHook.allowLogout {
             orig.sessionDidLogout(session, withReason: reason)
         } else {
@@ -237,6 +273,10 @@ class OauthAccessTokenBridgeHook: ClassHook<NSObject> {
 // 5=disconnect, 6=disconnected, 7=close, 8=closed, 9=error, 12=detach, 13=detached, 17=auth
 private let blockedAblyActions: Set<Int> = [5, 6, 7, 8, 9, 12, 13, 17]
 
+// Helper function to parse raw JSON strings from the WebSocket.
+// - It searches for the string "action":.
+// - It grabs the numbers immediately following it.
+// - It returns the integer action code (e.g., 15 or 5).
 private func extractAblyAction(_ text: String) -> Int? {
     guard let range = text.range(of: "\"action\":") else { return nil }
     let afterAction = text[range.upperBound...]
@@ -374,5 +414,3 @@ class URLSessionTaskResumeHook: ClassHook<NSObject> {
         orig.resume()
     }
 }
-
-
