@@ -167,15 +167,18 @@ class LegacyLoginControllerHook: ClassHook<NSObject> {
 
     func sessionDidLogout(_ session: AnyObject, withReason reason: AnyObject) {
         let elapsed = Int(Date().timeIntervalSince(tweakInitTime))
+        // Check if logout is explicitly allowed by user action
         if SPTAuthSessionHook.allowLogout {
             orig.sessionDidLogout(session, withReason: reason)
         } else {
+            // Block the legacy logout notification to prevent UI updates
             writeDebugLog("[LEGACY] Blocked sessionDidLogout at \(elapsed)s: \(reason)")
         }
     }
 
     func destroySession() {
         let elapsed = Int(Date().timeIntervalSince(tweakInitTime))
+        // destroySession wipes the C++ session object. We must prevent this to keep music playing.
         if SPTAuthSessionHook.allowLogout {
             orig.destroySession()
         } else {
@@ -185,6 +188,7 @@ class LegacyLoginControllerHook: ClassHook<NSObject> {
 
     func forgetStoredCredentials() {
         let elapsed = Int(Date().timeIntervalSince(tweakInitTime))
+        // Prevent the app from deleting the saved login token from disk/keychain
         if SPTAuthSessionHook.allowLogout {
             orig.forgetStoredCredentials()
         } else {
@@ -194,6 +198,7 @@ class LegacyLoginControllerHook: ClassHook<NSObject> {
 
     func invalidate() {
         let elapsed = Int(Date().timeIntervalSince(tweakInitTime))
+        // Prevent the controller from marking itself as invalid/logged out
         if SPTAuthSessionHook.allowLogout {
             orig.invalidate()
         } else {
@@ -213,11 +218,13 @@ class OauthAccessTokenBridgeHook: ClassHook<NSObject> {
 
     // Hook the GETTER
     func expiresAt() -> Any {
+        // Return a date 1 year in the future so the app thinks the token is valid
         let farFuture = Date(timeIntervalSinceNow: 365 * 24 * 60 * 60)
         return farFuture
     }
 
     func setExpiresAt(_ date: Any) {
+        // Force any attempt to set the expiry date to be 1 year in the future
         let farFuture = Date(timeIntervalSinceNow: 365 * 24 * 60 * 60)
         orig.setExpiresAt(farFuture)
     }
@@ -226,6 +233,7 @@ class OauthAccessTokenBridgeHook: ClassHook<NSObject> {
     // This catches cases where C++ sets the ivar without going through the ObjC setter
     func `init`() -> NSObject? {
         let result = orig.`init`()
+        // Manually overwrite the instance variable immediately after creation
         extendExpiryIvar()
         // Also start a repeating timer to keep extending the ivar
         startExpiryExtender()
@@ -234,22 +242,30 @@ class OauthAccessTokenBridgeHook: ClassHook<NSObject> {
 
     // orion:new
     func extendExpiryIvar() {
+        // Get the class type
         let bridgeClass: AnyClass = type(of: target)
+        // Look up the instance variable "expiresAt"
         if let ivar = class_getInstanceVariable(bridgeClass, "expiresAt") {
+            // Create date 1 year in future
             let farFuture = Date(timeIntervalSinceNow: 365 * 24 * 60 * 60)
+            // Write directly to memory, bypassing property setters
             object_setIvar(target, ivar, farFuture)
         }
     }
 
     // orion:new
     func startExpiryExtender() {
+        // Keep a weak reference to avoid retain cycles
         let weak = target
         // Extend the ivar every 60 seconds
         DispatchQueue.global(qos: .utility).async {
             while true {
+                // Wait 60 seconds
                 Thread.sleep(forTimeInterval: 60)
+                // Check if object still exists
                 guard let obj = weak as? NSObject else { break }
                 let cls: AnyClass = type(of: obj)
+                // Overwrite the variable again
                 if let ivar = class_getInstanceVariable(cls, "expiresAt") {
                     let farFuture = Date(timeIntervalSinceNow: 365 * 24 * 60 * 60)
                     object_setIvar(obj, ivar, farFuture)
@@ -290,11 +306,14 @@ class ARTWebSocketTransportHook: ClassHook<NSObject> {
 
     func webSocket(_ ws: AnyObject, didReceiveMessage message: AnyObject) {
         if let msgString = message as? String {
+            // Check if message contains an action code
             if let action = extractAblyAction(msgString) {
                 let actionName = ablyActionNames[action] ?? "unknown"
                 let elapsed = Int(Date().timeIntervalSince(tweakInitTime))
+                // Check if this action is in our block list (e.g. disconnect/auth fail)
                 if blockedAblyActions.contains(action) {
                     writeDebugLog("[ABLY] Blocked action \(action) (\(actionName)) at \(elapsed)s")
+                    // Return early, swallowing the message so the app never sees it
                     return
                 }
                 // Log action-15 (message) payloads — these may carry logout signals
@@ -304,11 +323,13 @@ class ARTWebSocketTransportHook: ClassHook<NSObject> {
                 }
             }
         }
+        // Pass legitimate messages to original handler
         orig.webSocket(ws, didReceiveMessage: message)
     }
 
     func webSocket(_ ws: AnyObject, didFailWithError error: AnyObject) {
         let elapsed = Int(Date().timeIntervalSince(tweakInitTime))
+        // Log WebSocket errors (often happens when we block auth packets)
         writeDebugLog("[ABLY] Blocked WebSocket didFailWithError at \(elapsed)s: \(error)")
     }
 }
@@ -320,13 +341,17 @@ class ARTSRWebSocketHook: ClassHook<NSObject> {
     static let targetName = "ARTSRWebSocket"
 
     func _handleFrameWithData(_ data: NSData, opCode code: Int) {
+        // OpCode 1 is a text frame
         if code == 1,
            let text = String(data: data as Data, encoding: .utf8) {
+            // Parse action from text
             if let action = extractAblyAction(text) {
                 let actionName = ablyActionNames[action] ?? "unknown"
                 let elapsed = Int(Date().timeIntervalSince(tweakInitTime))
+                // Check block list
                 if blockedAblyActions.contains(action) {
                     writeDebugLog("[ABLY-SR] Blocked frame action \(action) (\(actionName)) at \(elapsed)s")
+                    // Drop the frame
                     return
                 }
                 // Log action-15 (message) payloads — these may carry logout signals
@@ -336,6 +361,7 @@ class ARTSRWebSocketHook: ClassHook<NSObject> {
                 }
             }
         }
+        // Process allowed frames
         orig._handleFrameWithData(data, opCode: code)
     }
 }
@@ -347,6 +373,7 @@ class URLSessionTaskResumeHook: ClassHook<NSObject> {
     static let targetName = "NSURLSessionTask"
 
     func resume() {
+        // Check if the target is a URLSessionTask and get its URL
         if let task = target as? URLSessionTask,
            let url = task.currentRequest?.url ?? task.originalRequest?.url,
            let host = url.host?.lowercased() {
@@ -384,26 +411,31 @@ class URLSessionTaskResumeHook: ClassHook<NSObject> {
             // Block outgoing DeleteToken/signup requests at network level
             // Only block after initial startup (30s) to allow fresh login/signup
             if host.contains("spotify") || host.contains("spclient") {
+                // DeleteToken: The app trying to invalidate its own session
                 if elapsed > 30 && path.contains("DeleteToken") {
                     writeDebugLog("[NET] Cancelled DeleteToken at \(elapsedInt)s")
-                    task.cancel()
+                    task.cancel() // Abort the network request
                     return
                 }
+                // signup/public: Often called when the app thinks it needs to register a new user
                 if elapsed > 30 && path.contains("signup/public") {
                     writeDebugLog("[NET] Cancelled signup/public at \(elapsedInt)s")
                     task.cancel()
                     return
                 }
+                // screenconfig: UI configuration that might force a "Free" screen
                 if elapsed > 30 && path.contains("pses/screenconfig") {
                     writeDebugLog("[NET] Cancelled pses/screenconfig at \(elapsedInt)s")
                     task.cancel()
                     return
                 }
+                // bootstrap: The initial config fetch. Blocking re-fetches prevents config updates (like "downgrade to free")
                 if elapsed > 30 && path.contains("bootstrap/v1/bootstrap") {
                     writeDebugLog("[NET] Cancelled bootstrap re-fetch at \(elapsedInt)s")
                     task.cancel()
                     return
                 }
+                // apresolve: Resolves access point URLs. Blocking helps prevent connecting to new auth servers.
                 if elapsed > 30 && host.contains("apresolve") {
                     writeDebugLog("[NET] Cancelled apresolve at \(elapsedInt)s")
                     task.cancel()
@@ -411,6 +443,7 @@ class URLSessionTaskResumeHook: ClassHook<NSObject> {
                 }
             }
         }
+        // Proceed with normal network request if not blocked
         orig.resume()
     }
 }
